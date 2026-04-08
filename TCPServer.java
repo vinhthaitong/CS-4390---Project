@@ -1,50 +1,50 @@
 import java.io.*;
 import java.net.*;
-
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import net.objecthunter.exp4j.Expression;
 import net.objecthunter.exp4j.ExpressionBuilder;
 
 class TCPServer {
+  private static void handleClient(Socket connectionSocket) {
+    String remote = connectionSocket.getInetAddress().getHostAddress() + ":" + connectionSocket.getPort();
+    Instant connectedAt = Instant.now();
+    System.out.println("New connection from " + remote + " at " + formatTimestamp(connectedAt));
 
-  public static void main(String argv[]) throws Exception {
-    ServerSocket welcomeSocket = new ServerSocket(6789);
-    System.out.println("Server is UP and running on port 6789");
+    String clientName = null;
+    Instant attachedAt = null;
+    String disconnectReason = "connection closed";
 
-    while (true) {
-      Socket connectionSocket = welcomeSocket.accept();
-      String remote =
-          connectionSocket.getInetAddress().getHostAddress() + ":" + connectionSocket.getPort();
-      System.out.println("New connection from " + remote);
-
-      BufferedReader inFromClient = new BufferedReader(
-          new InputStreamReader(connectionSocket.getInputStream()));
-      DataOutputStream outToClient = new DataOutputStream(connectionSocket.getOutputStream());
+    try (Socket socket = connectionSocket;
+         BufferedReader inFromClient = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+         DataOutputStream outToClient = new DataOutputStream(socket.getOutputStream())) {
 
       String firstMessage = inFromClient.readLine();
       if (firstMessage == null) {
-        System.out.println("Connection closed before JOIN from " + remote);
-        connectionSocket.close();
-        continue;
+        disconnectReason = "closed before JOIN";
+        return;
       }
 
-      String clientName = null;
       if (firstMessage.startsWith("JOIN ")) {
         clientName = firstMessage.substring(5).trim();
         if (!clientName.isEmpty()) {
-          System.out.println("Client joined: " + clientName + " (" + remote + ")");
+          attachedAt = Instant.now();
+          System.out.println(
+              "Client connected: " + clientName + " (" + remote + ") at " + formatTimestamp(attachedAt));
           outToClient.writeBytes("ACK " + clientName + '\n');
           outToClient.flush();
         } else {
           outToClient.writeBytes("ERROR Name cannot be empty\n");
           outToClient.flush();
-          connectionSocket.close();
-          continue;
+          disconnectReason = "empty JOIN name";
+          return;
         }
       } else {
         outToClient.writeBytes("ERROR Expected: JOIN <name>\n");
         outToClient.flush();
-        connectionSocket.close();
-        continue;
+        disconnectReason = "invalid JOIN message";
+        return;
       }
 
       String message;
@@ -54,7 +54,7 @@ class TCPServer {
         if (trimmed.equalsIgnoreCase("CLOSE")) {
           outToClient.writeBytes("BYE\n");
           outToClient.flush();
-          System.out.println("Client disconnected: " + clientName + " (" + remote + ")");
+          disconnectReason = "client requested CLOSE";
           break;
         }
 
@@ -68,7 +68,8 @@ class TCPServer {
 
           try {
             double result = evaluateExpression(expression);
-            System.out.println(clientName + " requested: " + expression + " => " + formatResult(result));
+            System.out.println(
+                clientName + " requested: " + expression + " => " + formatResult(result));
             outToClient.writeBytes("RESULT " + formatResult(result) + '\n');
             outToClient.flush();
           } catch (IllegalArgumentException ex) {
@@ -82,7 +83,26 @@ class TCPServer {
         outToClient.flush();
       }
 
-      connectionSocket.close();
+      if (message == null) {
+        disconnectReason = "client stream closed";
+      }
+    } catch (IOException ex) {
+      disconnectReason = "I/O error: " + ex.getMessage();
+      System.out.println("Connection error with " + remote + ": " + ex.getMessage());
+    } finally {
+      Instant detachedAt = Instant.now();
+      if (attachedAt != null && clientName != null) {
+        Duration sessionDuration = Duration.between(attachedAt, detachedAt);
+        System.out.println(
+            "Client connected: " + clientName + " (" + remote + ") | connected at "
+                + formatTimestamp(attachedAt) + " | disconnected at " + formatTimestamp(detachedAt)
+                + " | duration " + formatDuration(sessionDuration) + " | reason: "
+                + disconnectReason);
+      } else {
+        System.out.println(
+            "Connection closed without successful attachment from " + remote + " at "
+                + formatTimestamp(detachedAt) + " | reason: " + disconnectReason);
+      }
     }
   }
 
@@ -108,6 +128,31 @@ class TCPServer {
         throw ex;
       }
       throw new IllegalArgumentException("Invalid expression");
+    }
+  }
+
+  private static String formatTimestamp(Instant instant) {
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z", Locale.US)
+        .withZone(ZoneId.systemDefault());
+    return formatter.format(instant);
+  }
+
+  private static String formatDuration(Duration duration) {
+    long totalSeconds = Math.max(0, duration.getSeconds());
+    long hours = totalSeconds / 3600;
+    long minutes = (totalSeconds % 3600) / 60;
+    long seconds = totalSeconds % 60;
+    return String.format("%02dh:%02dm:%02ds", hours, minutes, seconds);
+  }
+
+  public static void main(String argv[]) throws Exception {
+    ServerSocket welcomeSocket = new ServerSocket(6789);
+    System.out.println("Server is UP and running on port 6789");
+
+    while (true) {
+      Socket connectionSocket = welcomeSocket.accept();
+      Thread clientThread = new Thread(() -> handleClient(connectionSocket));
+      clientThread.start();
     }
   }
 }
