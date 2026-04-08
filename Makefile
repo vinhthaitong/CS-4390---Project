@@ -1,8 +1,8 @@
 JAVAC = javac
 JAVA = java
 
-CLASSPATH = .:lib/exp4j-0.4.8.jar
-SOURCES = TCPServer.java TCPClient.java
+CLASSPATH = .
+SOURCES = Parser.java TCPServer.java TCPClient.java
 
 .PHONY: all compile server client clean
 

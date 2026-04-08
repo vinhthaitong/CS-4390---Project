@@ -1,10 +1,8 @@
 import java.io.*;
 import java.net.*;
+import java.util.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.Locale;
-import net.objecthunter.exp4j.Expression;
-import net.objecthunter.exp4j.ExpressionBuilder;
 
 class TCPServer {
   private static void handleClient(Socket connectionSocket) {
@@ -115,14 +113,7 @@ class TCPServer {
 
   private static double evaluateExpression(String expression) {
     try {
-      Expression parsedExpression = new ExpressionBuilder(expression).build();
-      double result = parsedExpression.evaluate();
-
-      if (Double.isNaN(result) || Double.isInfinite(result)) {
-        throw new IllegalArgumentException("DIVIDE_BY_ZERO");
-      }
-
-      return result;
+      return Parser.parse(expression);
     } catch (IllegalArgumentException ex) {
       if ("DIVIDE_BY_ZERO".equals(ex.getMessage())) {
         throw ex;
