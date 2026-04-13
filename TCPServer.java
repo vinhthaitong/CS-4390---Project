@@ -1,149 +1,156 @@
-import java.io.*;
-import java.net.*;
-import java.util.*;
-import java.time.*;
+/* SERVER SIDE:
+  - Accept multiple clients at the same time (one thread per client).
+  - Server receives JOIN, EXPR, and CLOSE messages from each client.
+  - Send ACK/RESULT/ERROR/BYE responses back to the client.
+  - Keeping track of connection time, disconnection time, and duration in seconds.
+*/
+
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 class TCPServer {
-  private static void handleClient(Socket connectionSocket) {
-    String remote = connectionSocket.getInetAddress().getHostAddress() + ":" + connectionSocket.getPort();
-    Instant connectedAt = Instant.now();
-    System.out.println("New connection from " + remote + " at " + formatTimestamp(connectedAt));
+  // Handle one client session from JOIN until CLOSE or disconnect.
+  private static void handleClient(Socket clientSocket) {
+    String clientEndpoint = clientSocket.getInetAddress().getHostAddress() + ":" + clientSocket.getPort();
+    Instant connectionAcceptedAt = Instant.now();
+    System.out.println("New connection from " + clientEndpoint + " at " + formatTimestamp(connectionAcceptedAt));
 
     String clientName = null;
     Instant attachedAt = null;
     String disconnectReason = "connection closed";
 
-    try (Socket socket = connectionSocket;
-         BufferedReader inFromClient = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-         DataOutputStream outToClient = new DataOutputStream(socket.getOutputStream())) {
+    try (Socket activeSocket = clientSocket;
+         BufferedReader clientInputReader = new BufferedReader(new InputStreamReader(activeSocket.getInputStream()));
+         DataOutputStream clientOutputStream = new DataOutputStream(activeSocket.getOutputStream())) {
 
-      String firstMessage = inFromClient.readLine();
-      if (firstMessage == null) {
+      String joinRequestLine = clientInputReader.readLine();
+      if (joinRequestLine == null) {
         disconnectReason = "closed before JOIN";
         return;
       }
 
-      if (firstMessage.startsWith("JOIN ")) {
-        clientName = firstMessage.substring(5).trim();
+      if (joinRequestLine.startsWith("JOIN: ")) {
+        clientName = joinRequestLine.substring(6).trim();
         if (!clientName.isEmpty()) {
           attachedAt = Instant.now();
-          System.out.println(
-              "Client connected: " + clientName + " (" + remote + ") at " + formatTimestamp(attachedAt));
-          outToClient.writeBytes("ACK " + clientName + '\n');
-          outToClient.flush();
+          System.out.println("Client connected: " + clientName + " (" + clientEndpoint + ") at " + formatTimestamp(attachedAt));
+          clientOutputStream.writeBytes("ACK: " + clientName + '\n');
+          clientOutputStream.flush();
         } else {
-          outToClient.writeBytes("ERROR Name cannot be empty\n");
-          outToClient.flush();
+          clientOutputStream.writeBytes("ERROR: Name cannot be empty\n");
+          clientOutputStream.flush();
           disconnectReason = "empty JOIN name";
           return;
         }
       } else {
-        outToClient.writeBytes("ERROR Expected: JOIN <name>\n");
-        outToClient.flush();
+        clientOutputStream.writeBytes("ERROR: Expected JOIN: <name>\n");
+        clientOutputStream.flush();
         disconnectReason = "invalid JOIN message";
         return;
       }
 
-      String message;
-      while ((message = inFromClient.readLine()) != null) {
-        String trimmed = message.trim();
+      String requestLine;
+      while ((requestLine = clientInputReader.readLine()) != null) {
+        String normalizedRequest = requestLine.trim();
 
-        if (trimmed.equalsIgnoreCase("CLOSE")) {
-          outToClient.writeBytes("BYE\n");
-          outToClient.flush();
+        if (normalizedRequest.equalsIgnoreCase("CLOSE")) {
+          clientOutputStream.writeBytes("BYE\n");
+          clientOutputStream.flush();
           disconnectReason = "client requested CLOSE";
           break;
         }
 
-        if (trimmed.startsWith("EXPR ")) {
-          String expression = trimmed.substring(5).trim();
-          if (expression.isEmpty()) {
-            outToClient.writeBytes("ERROR Empty expression\n");
-            outToClient.flush();
+        if (normalizedRequest.startsWith("EXPR: ")) {
+          String expressionText = normalizedRequest.substring(6).trim();
+          if (expressionText.isEmpty()) {
+            clientOutputStream.writeBytes("ERROR: Empty expression\n");
+            clientOutputStream.flush();
             continue;
           }
 
           try {
-            double result = evaluateExpression(expression);
-            System.out.println(
-                clientName + " requested: " + expression + " => " + formatResult(result));
-            outToClient.writeBytes("RESULT " + formatResult(result) + '\n');
-            outToClient.flush();
-          } catch (IllegalArgumentException ex) {
-            outToClient.writeBytes("ERROR " + ex.getMessage() + '\n');
-            outToClient.flush();
+            double evaluatedResult = evaluateExpression(expressionText);
+            String resultText = Double.toString(evaluatedResult);
+            System.out.println(clientName + " requested: " + expressionText + " => " + resultText);
+            clientOutputStream.writeBytes("RESULT = " + resultText + '\n');
+            clientOutputStream.flush();
+          } catch (IllegalArgumentException parseException) {
+            clientOutputStream.writeBytes("ERROR: " + parseException.getMessage() + '\n');
+            clientOutputStream.flush();
           }
           continue;
         }
 
-        outToClient.writeBytes("ERROR Expected: EXPR <expression> or CLOSE\n");
-        outToClient.flush();
+        clientOutputStream.writeBytes("ERROR: Expected EXPR: <expression> or CLOSE\n");
+        clientOutputStream.flush();
       }
 
-      if (message == null) {
+      if (requestLine == null) {
         disconnectReason = "client stream closed";
       }
-    } catch (IOException ex) {
-      disconnectReason = "I/O error: " + ex.getMessage();
-      System.out.println("Connection error with " + remote + ": " + ex.getMessage());
+    } catch (IOException ioException) {
+      disconnectReason = "I/O error: " + ioException.getMessage();
+      System.out.println("Connection error with " + clientEndpoint + ": " + ioException.getMessage());
     } finally {
-      Instant detachedAt = Instant.now();
+      Instant disconnectedAt = Instant.now();
       if (attachedAt != null && clientName != null) {
-        Duration sessionDuration = Duration.between(attachedAt, detachedAt);
+        Duration attachedDuration = Duration.between(attachedAt, disconnectedAt);
         System.out.println(
-            "Client connected: " + clientName + " (" + remote + ") | connected at "
-                + formatTimestamp(attachedAt) + " | disconnected at " + formatTimestamp(detachedAt)
-                + " | duration " + formatDuration(sessionDuration) + " | reason: "
-                + disconnectReason);
+            "Client connected: " + clientName + " (" + clientEndpoint + ") | connected at "
+                + formatTimestamp(attachedAt) + " | disconnected at "
+                + formatTimestamp(disconnectedAt) + " | duration: "
+                + formatDuration(attachedDuration) + " | reason: " + disconnectReason);
       } else {
-        System.out.println(
-            "Connection closed without successful attachment from " + remote + " at "
-                + formatTimestamp(detachedAt) + " | reason: " + disconnectReason);
+        System.out.println("Connection closed without successful attachment from " + clientEndpoint + " at "
+                            + formatTimestamp(disconnectedAt) + " | reason: " + disconnectReason);
       }
     }
   }
 
-  private static String formatResult(double value) {
-    if (value == (long) value) {
-      return Long.toString((long) value);
-    }
-    return Double.toString(value);
-  }
-
-  private static double evaluateExpression(String expression) {
+  // Parse and evaluate one expression string using the parser helper.
+  private static double evaluateExpression(String expressionText) {
     try {
-      return Parser.parse(expression);
-    } catch (IllegalArgumentException ex) {
-      if ("DIVIDE_BY_ZERO".equals(ex.getMessage())) {
-        throw ex;
+      return Parser.parse(expressionText);
+    } catch (IllegalArgumentException parseException) {
+      if ("DIVIDE_BY_ZERO".equals(parseException.getMessage())) {
+        throw parseException;
       }
       throw new IllegalArgumentException("Invalid expression");
     }
   }
 
-  private static String formatTimestamp(Instant instant) {
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z", Locale.US)
-        .withZone(ZoneId.systemDefault());
-    return formatter.format(instant);
+  // Format an Instant into a readable local date-time string.
+  private static String formatTimestamp(Instant timestamp) {
+    DateTimeFormatter timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z", Locale.US).withZone(ZoneId.systemDefault());
+    return timestampFormatter.format(timestamp);
   }
 
-  private static String formatDuration(Duration duration) {
-    long totalSeconds = Math.max(0, duration.getSeconds());
-    long hours = totalSeconds / 3600;
-    long minutes = (totalSeconds % 3600) / 60;
-    long seconds = totalSeconds % 60;
-    return String.format("%02dh:%02dm:%02ds", hours, minutes, seconds);
+  // Convert attached duration into total seconds text.
+  private static String formatDuration(Duration attachedDuration) {
+    long totalSeconds = Math.max(0, attachedDuration.getSeconds());
+    return totalSeconds + "s";
   }
 
+  // Start the server socket and dispatch each new client to a thread.
   public static void main(String argv[]) throws Exception {
-    ServerSocket welcomeSocket = new ServerSocket(6789);
+    // Server is listening on port 6789
+    ServerSocket listeningSocket = new ServerSocket(6789);
     System.out.println("Server is UP and running on port 6789");
 
     while (true) {
-      Socket connectionSocket = welcomeSocket.accept();
-      Thread clientThread = new Thread(() -> handleClient(connectionSocket));
-      clientThread.start();
+      Socket acceptedClientSocket = listeningSocket.accept();
+      // Each client connected will create a new thread to handle multiple clients.
+      Thread clientHandlerThread = new Thread(() -> handleClient(acceptedClientSocket));
+      clientHandlerThread.start();
     }
   }
 }

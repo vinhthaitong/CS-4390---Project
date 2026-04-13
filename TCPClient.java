@@ -1,81 +1,72 @@
-import java.io.*;
-import java.net.*;
-import java.util.Random;
+/* CLIENT SIDE: 
+  - Send the server request, wait until ACK. 
+  - User input their name.
+  - Send basic math calculation requests (example: 1+2*2/4 *ENTER*).
+  - Type "CLOSE" or "close" to close connection. 
+*/
+
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.net.Socket;
 
 class TCPClient {
 
+  // Start the client, join the server, and interactively send expressions.
   public static void main(String argv[]) throws Exception {
     System.out.println("Client is running");
 
-    Socket clientSocket = new Socket("127.0.0.1", 6789);
-    BufferedReader inFromUser = new BufferedReader(new InputStreamReader(System.in));
-    BufferedReader inFromServer = new BufferedReader(
-        new InputStreamReader(clientSocket.getInputStream()));
-    DataOutputStream outToServer = new DataOutputStream(clientSocket.getOutputStream());
+    // Send request to server at IP: 127.0.0.1, PORT: 6789
+    Socket serverConnectionSocket = new Socket("127.0.0.1", 6789);
+    BufferedReader userInputReader = new BufferedReader(new InputStreamReader(System.in));
+    BufferedReader serverInputReader = new BufferedReader(new InputStreamReader(serverConnectionSocket.getInputStream()));
+    DataOutputStream serverOutputStream = new DataOutputStream(serverConnectionSocket.getOutputStream());
 
     System.out.print("Enter your name: ");
-    String clientName = inFromUser.readLine();
-    if (clientName == null || clientName.trim().isEmpty()) {
+    String clientDisplayName = userInputReader.readLine();
+    if (clientDisplayName == null || clientDisplayName.trim().isEmpty()) {
       System.out.println("Name cannot be empty.");
-      clientSocket.close();
+      serverConnectionSocket.close();
       return;
     }
 
-    outToServer.writeBytes("JOIN " + clientName.trim() + '\n');
-    outToServer.flush();
-    String serverResponse = inFromServer.readLine();
-    System.out.println("FROM SERVER: " + serverResponse);
+    serverOutputStream.writeBytes("JOIN: " + clientDisplayName.trim() + '\n');
+    serverOutputStream.flush();
+    String joinResponseLine = serverInputReader.readLine();
+    System.out.println("FROM SERVER: " + joinResponseLine);
 
-    if (serverResponse == null || !serverResponse.startsWith("ACK ")) {
+    if (joinResponseLine == null || !joinResponseLine.startsWith("ACK: ")) {
       System.out.println("Handshake failed. Closing client.");
-      clientSocket.close();
+      serverConnectionSocket.close();
       return;
     }
 
-    String[] sampleExpressions = {
-        "2 + 3 * 4",
-        "(10 - 2) / 4",
-        "8 / 2 + 7",
-        "9 - 3 + 1",
-        "(3 + 5) * (2 - 1)",
-        "18 / (3 * 2)",
-        "4 * (2 + 6) / 3",
-        "100 / (5 + 5)",
-        "(7 - 9) * 3",
-        "(2.5 + 1.5) * 2",
-        "(8 + 2) / (3 - 1)",
-        "42 / 7 + 1",
-        "15 - (4 + 6) / 2",
-        "6 * 6 - 5"
-    };
-    Random random = new Random();
-    int requestCount = 3;
-
-    for (int i = 1; i <= requestCount; i++) {
-      String expression = sampleExpressions[random.nextInt(sampleExpressions.length)];
-      int delayMillis = 1000 + random.nextInt(2001);
-
-      try {
-        Thread.sleep(delayMillis);
-      } catch (InterruptedException ex) {
-        Thread.currentThread().interrupt();
-        System.out.println("Client interrupted while waiting to send request.");
+    while (true) {
+      System.out.print("Enter expression (or CLOSE): ");
+      String expressionInputLine = userInputReader.readLine();
+      if (expressionInputLine == null) {
         break;
       }
 
-      System.out.println("Sending request " + i + ": EXPR " + expression);
-      outToServer.writeBytes("EXPR " + expression + '\n');
-      outToServer.flush();
+      String normalizedInput = expressionInputLine.trim();
+      if (normalizedInput.isEmpty()) {
+        continue;
+      }
 
-      String mathResponse = inFromServer.readLine();
-      System.out.println("FROM SERVER: " + mathResponse);
+      if (normalizedInput.equalsIgnoreCase("CLOSE")) {
+        serverOutputStream.writeBytes("CLOSE\n");
+        serverOutputStream.flush();
+        String closeAckLine = serverInputReader.readLine();
+        System.out.println("FROM SERVER: " + closeAckLine);
+        break;
+      }
+
+      serverOutputStream.writeBytes("EXPR: " + normalizedInput + '\n');
+      serverOutputStream.flush();
+      String expressionResultLine = serverInputReader.readLine();
+      System.out.println("FROM SERVER: " + expressionResultLine);
     }
 
-    outToServer.writeBytes("CLOSE\n");
-    outToServer.flush();
-    String byeResponse = inFromServer.readLine();
-    System.out.println("FROM SERVER: " + byeResponse);
-
-    clientSocket.close();
+    serverConnectionSocket.close();
   }
 }

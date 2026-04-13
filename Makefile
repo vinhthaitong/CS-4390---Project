@@ -1,21 +1,15 @@
-JAVAC = javac
-JAVA = java
-
-CLASSPATH = .
-SOURCES = Parser.java TCPServer.java TCPClient.java
-
 .PHONY: all compile server client clean
 
 all: compile
 
 compile:
-	$(JAVAC) -cp $(CLASSPATH) $(SOURCES)
+	javac -cp . Parser.java TCPServer.java TCPClient.java
 
 server: compile
-	$(JAVA) -cp $(CLASSPATH) TCPServer
+	java -cp . TCPServer
 
 client: compile
-	$(JAVA) -cp $(CLASSPATH) TCPClient
+	java -cp . TCPClient
 
 clean:
 	rm -f *.class

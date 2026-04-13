@@ -1,54 +1,66 @@
-class Parser {
-  private final String text;
-  private int pos;
+/* PARSER SIDE:
+  - Parse a math expression string into a numeric result.
+  - Support +, -, *, /, unary signs, decimals, and parentheses.
+  - Respect operator precedence with expression/term/factor parsing.
+  - Throw DIVIDE_BY_ZERO or Invalid expression when parsing fails.
+*/
 
-  private Parser(String text) {
-    this.text = text;
-    this.pos = 0;
+class Parser {
+  private final String expressionText;
+  private int currentIndex;
+
+  // Create a parser instance with the expression and start index.
+  private Parser(String expressionText) {
+    this.expressionText = expressionText;
+    this.currentIndex = 0;
   }
 
-  static double parse(String expression) {
-    Parser parser = new Parser(expression);
-    double result = parser.parseExpression();
-    parser.skipSpaces();
-    if (!parser.isEnd()) {
+  // Parse the full expression 
+  static double parse(String expressionText) {
+    Parser expressionParser = new Parser(expressionText);
+    double parsedResult = expressionParser.parseExpression();
+    expressionParser.skipSpaces();
+    if (!expressionParser.isEnd()) {
       throw new IllegalArgumentException("Invalid expression");
     }
-    return result;
+    return parsedResult;
   }
 
+  // Parse addition and subtraction operations.
   private double parseExpression() {
-    double value = parseTerm();
+    double expressionValue = parseTerm();
     while (true) {
       skipSpaces();
       if (match('+')) {
-        value += parseTerm();
+        expressionValue += parseTerm();
       } else if (match('-')) {
-        value -= parseTerm();
+        expressionValue -= parseTerm();
       } else {
-        return value;
+        return expressionValue;
       }
     }
   }
 
+  // Parse multiplication and division operations.
   private double parseTerm() {
-    double value = parseFactor();
+    double termValue = parseFactor();
     while (true) {
       skipSpaces();
       if (match('*')) {
-        value *= parseFactor();
+        termValue *= parseFactor();
       } else if (match('/')) {
-        double divisor = parseFactor();
-        if (divisor == 0.0) {
+        double divisorValue = parseFactor();
+        if (divisorValue == 0.0) {
           throw new IllegalArgumentException("DIVIDE_BY_ZERO");
         }
-        value /= divisor;
+        termValue /= divisorValue;
       } else {
-        return value;
+        return termValue;
       }
     }
   }
 
+  // Parse unary operators, parenthesized groups, or numbers.
   private double parseFactor() {
     skipSpaces();
 
@@ -59,60 +71,63 @@ class Parser {
       return -parseFactor();
     }
     if (match('(')) {
-      double value = parseExpression();
+      double nestedValue = parseExpression();
       skipSpaces();
       if (!match(')')) {
         throw new IllegalArgumentException("Invalid expression");
       }
-      return value;
+      return nestedValue;
     }
-
     return parseNumber();
   }
 
+  // Parse one numeric literal (integer or decimal).
   private double parseNumber() {
     skipSpaces();
-    int start = pos;
-    boolean seenDigit = false;
-    boolean seenDot = false;
+    int numberStartIndex = currentIndex;
+    boolean foundDigit = false;
+    boolean foundDecimalPoint = false;
 
     while (!isEnd()) {
-      char ch = text.charAt(pos);
-      if (Character.isDigit(ch)) {
-        seenDigit = true;
-        pos++;
-      } else if (ch == '.') {
-        if (seenDot) {
+      char currentChar = expressionText.charAt(currentIndex);
+      if (Character.isDigit(currentChar)) {
+        foundDigit = true;
+        currentIndex++;
+      } else if (currentChar == '.') {
+        if (foundDecimalPoint) {
           break;
         }
-        seenDot = true;
-        pos++;
+        foundDecimalPoint = true;
+        currentIndex++;
       } else {
         break;
       }
     }
 
-    if (!seenDigit) {
+    if (!foundDigit) {
       throw new IllegalArgumentException("Invalid expression");
     }
-    return Double.parseDouble(text.substring(start, pos));
+    return Double.parseDouble(expressionText.substring(numberStartIndex, currentIndex));
   }
 
-  private boolean match(char expected) {
-    if (!isEnd() && text.charAt(pos) == expected) {
-      pos++;
+  // Match one expected character and advance if it exists.
+  private boolean match(char expectedChar) {
+    if (!isEnd() && expressionText.charAt(currentIndex) == expectedChar) {
+      currentIndex++;
       return true;
     }
     return false;
   }
 
+  // Skip whitespace characters in the expression text.
   private void skipSpaces() {
-    while (!isEnd() && Character.isWhitespace(text.charAt(pos))) {
-      pos++;
+    while (!isEnd() && Character.isWhitespace(expressionText.charAt(currentIndex))) {
+      currentIndex++;
     }
   }
 
+  // Check whether the parser reached the end of the expression.
   private boolean isEnd() {
-    return pos >= text.length();
+    return currentIndex >= expressionText.length();
   }
 }
