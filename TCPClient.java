@@ -5,9 +5,7 @@
   - Type "CLOSE" or "close" to close connection. 
 */
 
-import java.io.BufferedReader;
-import java.io.DataOutputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.Socket;
 
 class TCPClient {

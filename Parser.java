@@ -1,7 +1,7 @@
 /* PARSER SIDE:
   - Parse a math expression string into a numeric result.
   - Support +, -, *, /, unary signs, decimals, and parentheses.
-  - Respect operator precedence with expression/term/factor parsing.
+  - Parser evaluates operators in the correct math order.
   - Throw DIVIDE_BY_ZERO or Invalid expression when parsing fails.
 */
 
